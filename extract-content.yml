@@ -1,0 +1,34 @@
+name: Extract Course Content
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  extract:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Install dependencies
+        run: |
+          pip install python-pptx pdfplumber
+      
+      - name: Run extraction script
+        run: python extract_course_content.py
+      
+      - name: Commit extracted content
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add course_content.txt
+          git diff --quiet && git diff --staged --quiet || git commit -m "Extract course content from presentations"
+          git push
