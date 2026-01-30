@@ -1,158 +1,120 @@
 from pptx import Presentation
 from pptx.enum.shapes import MSO_SHAPE_TYPE
 import pdfplumber
-import os
 from PIL import Image
+import os
 import io
 
-def extract_images_from_pptx(file_path, course_num):
-    """Extract images from PowerPoint file"""
-    try:
-        prs = Presentation(file_path)
-        image_dir = f"images/course{course_num}"
-        os.makedirs(image_dir, exist_ok=True)
-        
-        image_count = 0
-        image_references = []
-        
-        for slide_num, slide in enumerate(prs.slides, 1):
-            for shape_num, shape in enumerate(slide.shapes):
-                if shape.shape_type == MSO_SHAPE_TYPE.PICTURE:
-                    image = shape.image
-                    image_bytes = image.blob
-                    
-                    # Determine image extension
-                    ext = image.ext
-                    image_filename = f"slide{slide_num}_image{shape_num}.{ext}"
-                    image_path = os.path.join(image_dir, image_filename)
-                    
-                    # Save image
-                    with open(image_path, 'wb') as img_file:
-                        img_file.write(image_bytes)
-                    
-                    image_references.append((slide_num, image_path))
-                    image_count += 1
-        
-        return image_references, image_count
-    except Exception as e:
-        print(f"Error extracting images from {file_path}: {str(e)}")
-        return [], 0
-
-def extract_images_from_pdf(file_path, course_num):
-    """Extract images from PDF file"""
-    try:
-        image_dir = f"images/course{course_num}"
-        os.makedirs(image_dir, exist_ok=True)
-        
-        image_count = 0
-        image_references = []
-        
-        with pdfplumber.open(file_path) as pdf:
-            for page_num, page in enumerate(pdf.pages, 1):
-                # Extract images from page
-                if hasattr(page, 'images'):
-                    for img_num, img in enumerate(page.images):
-                        try:
-                            image_filename = f"page{page_num}_image{img_num}.png"
-                            image_path = os.path.join(image_dir, image_filename)
-                            
-                            # Note: pdfplumber doesn't directly save images, so we'll note them
-                            image_references.append((page_num, image_path))
-                            image_count += 1
-                        except Exception as e:
-                            print(f"Error processing image on page {page_num}: {str(e)}")
-        
-        return image_references, image_count
-    except Exception as e:
-        print(f"Error extracting images from {file_path}: {str(e)}")
-        return [], 0
-
-def extract_text_from_pptx(file_path, course_num):
-    """Extract text from PowerPoint file with better formatting"""
+def extract_from_pptx(file_path, course_num):
+    """Extract text and images from PowerPoint file"""
     try:
         prs = Presentation(file_path)
         text_content = []
-        image_refs, img_count = extract_images_from_pptx(file_path, course_num)
+        image_count = 0
         
-        # Create a mapping of slide numbers to images
-        slide_images = {}
-        for slide_num, img_path in image_refs:
-            if slide_num not in slide_images:
-                slide_images[slide_num] = []
-            slide_images[slide_num].append(img_path)
+        # Create image directory for this course
+        img_dir = f"images/course{course_num}"
+        os.makedirs(img_dir, exist_ok=True)
         
         for slide_num, slide in enumerate(prs.slides, 1):
-            slide_text = [f"\n{'─' * 60}"]
-            slide_text.append(f"SLIDE {slide_num}")
-            slide_text.append('─' * 60)
+            text_content.append(f"\n{'─' * 60}")
+            text_content.append(f"SLIDE {slide_num}")
+            text_content.append(f"{'─' * 60}\n")
             
-            # Extract text from shapes
+            slide_images = []
+            slide_text = []
+            
             for shape in slide.shapes:
+                # Extract text
                 if hasattr(shape, "text") and shape.text.strip():
-                    text = shape.text.strip()
-                    
-                    # Try to identify if it's a title (usually larger/first text box)
-                    if shape == slide.shapes[0] if slide.shapes else False:
-                        slide_text.append(f"\n## {text}")
-                    else:
-                        # Preserve line breaks and bullet points
-                        lines = text.split('\n')
-                        for line in lines:
-                            if line.strip():
-                                # Check if it looks like a bullet point
-                                if line.strip().startswith(('•', '-', '●', '○')):
-                                    slide_text.append(f"  {line.strip()}")
-                                else:
-                                    slide_text.append(f"{line.strip()}")
+                    slide_text.append(shape.text.strip())
+                
+                # Extract images
+                if shape.shape_type == MSO_SHAPE_TYPE.PICTURE:
+                    image_count += 1
+                    try:
+                        image = shape.image
+                        image_bytes = image.blob
+                        img_filename = f"slide{slide_num}_img{image_count}.{image.ext}"
+                        img_path = os.path.join(img_dir, img_filename)
+                        
+                        with open(img_path, 'wb') as img_file:
+                            img_file.write(image_bytes)
+                        
+                        slide_images.append(img_filename)
+                    except Exception as e:
+                        print(f"Error extracting image: {e}")
             
-            # Add image references if any
-            if slide_num in slide_images:
-                slide_text.append(f"\n[Images in this slide: {', '.join(slide_images[slide_num])}]")
+            # Add text content
+            if slide_text:
+                text_content.append("\n".join(slide_text))
+            else:
+                text_content.append("[No text on this slide]")
             
-            text_content.append("\n".join(slide_text))
+            # Add image references
+            if slide_images:
+                text_content.append(f"\n📷 Images on this slide:")
+                for img in slide_images:
+                    text_content.append(f"   - {img_dir}/{img}")
+            
+            text_content.append("")
         
-        print(f"  Extracted {img_count} images from {file_path}")
-        return "\n\n".join(text_content)
+        return "\n".join(text_content), image_count
     except Exception as e:
-        return f"Error extracting from {file_path}: {str(e)}"
+        return f"Error extracting from {file_path}: {str(e)}", 0
 
-def extract_text_from_pdf(file_path, course_num):
-    """Extract text from PDF file with better formatting"""
+def extract_from_pdf(file_path, course_num):
+    """Extract text and images from PDF file"""
     try:
         text_content = []
-        image_refs, img_count = extract_images_from_pdf(file_path, course_num)
+        image_count = 0
         
-        # Create a mapping of page numbers to images
-        page_images = {}
-        for page_num, img_path in image_refs:
-            if page_num not in page_images:
-                page_images[page_num] = []
-            page_images[page_num].append(img_path)
+        # Create image directory for this course
+        img_dir = f"images/course{course_num}"
+        os.makedirs(img_dir, exist_ok=True)
         
         with pdfplumber.open(file_path) as pdf:
             for page_num, page in enumerate(pdf.pages, 1):
-                page_text = [f"\n{'─' * 60}"]
-                page_text.append(f"PAGE {page_num}")
-                page_text.append('─' * 60)
+                text_content.append(f"\n{'─' * 60}")
+                text_content.append(f"PAGE {page_num}")
+                text_content.append(f"{'─' * 60}\n")
                 
+                # Extract text
                 text = page.extract_text()
                 if text:
-                    # Preserve formatting
-                    lines = text.split('\n')
-                    for line in lines:
-                        if line.strip():
-                            page_text.append(line)
+                    text_content.append(text.strip())
+                else:
+                    text_content.append("[No text on this page]")
                 
-                # Add image references if any
-                if page_num in page_images:
-                    page_text.append(f"\n[Images on this page: {', '.join(page_images[page_num])}]")
+                # Extract images
+                page_images = []
+                if hasattr(page, 'images'):
+                    for img_idx, img_info in enumerate(page.images, 1):
+                        image_count += 1
+                        try:
+                            img_filename = f"page{page_num}_img{img_idx}.png"
+                            img_path = os.path.join(img_dir, img_filename)
+                            
+                            # Extract image using pdfplumber
+                            x0, y0, x1, y1 = img_info['x0'], img_info['top'], img_info['x1'], img_info['bottom']
+                            cropped = page.crop((x0, y0, x1, y1))
+                            img = cropped.to_image(resolution=150)
+                            img.save(img_path)
+                            
+                            page_images.append(img_filename)
+                        except Exception as e:
+                            print(f"Error extracting image from page {page_num}: {e}")
                 
-                text_content.append("\n".join(page_text))
+                if page_images:
+                    text_content.append(f"\n📷 Images on this page:")
+                    for img in page_images:
+                        text_content.append(f"   - {img_dir}/{img}")
+                
+                text_content.append("")
         
-        print(f"  Extracted {img_count} images from {file_path}")
-        return "\n\n".join(text_content)
+        return "\n".join(text_content), image_count
     except Exception as e:
-        return f"Error extracting from {file_path}: {str(e)}"
+        return f"Error extracting from {file_path}: {str(e)}", 0
 
 def main():
     # Define course files in order
@@ -171,11 +133,10 @@ def main():
     ]
     
     all_content = []
-    all_content.append("=" * 80)
-    all_content.append("NEURAL NETWORKS COURSE CONTENT")
-    all_content.append("Extracted from courses 1-11")
-    all_content.append("=" * 80)
-    all_content.append("")
+    total_images = 0
+    
+    # Create main images directory
+    os.makedirs("images", exist_ok=True)
     
     for course_num, (file_name, course_title) in enumerate(course_files, 1):
         if not os.path.exists(file_name):
@@ -185,28 +146,30 @@ def main():
         print(f"Extracting {course_title}...")
         all_content.append("\n\n")
         all_content.append("=" * 80)
-        all_content.append(course_title.upper())
+        all_content.append(course_title.upper().center(80))
         all_content.append("=" * 80)
-        all_content.append("")
         
         if file_name.endswith('.pptx'):
-            content = extract_text_from_pptx(file_name, course_num)
+            content, img_count = extract_from_pptx(file_name, course_num)
         elif file_name.endswith('.pdf'):
-            content = extract_text_from_pdf(file_name, course_num)
+            content, img_count = extract_from_pdf(file_name, course_num)
         else:
             content = f"Unknown file format: {file_name}"
+            img_count = 0
         
         all_content.append(content)
+        total_images += img_count
+        print(f"  Extracted {img_count} images")
     
     # Write all content to a single file
     output_file = "course_content.txt"
     with open(output_file, 'w', encoding='utf-8') as f:
         f.write("\n".join(all_content))
     
-    print(f"\n{'=' * 60}")
-    print(f"✓ Content extracted successfully to {output_file}")
-    print(f"✓ Images saved in images/ directory")
-    print(f"{'=' * 60}")
+    print(f"\n✅ Content extracted successfully!")
+    print(f"   - Text saved to: {output_file}")
+    print(f"   - Total images extracted: {total_images}")
+    print(f"   - Images saved in: images/course1/ through images/course11/")
 
 if __name__ == "__main__":
     main()
